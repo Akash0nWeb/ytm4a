@@ -1,17 +1,14 @@
-from flask import Flask, render_template, request, send_file, redirect, url_for, flash, jsonify, Response, abort
-from flask import after_this_request
+from flask import Flask, render_template, request, send_file, redirect, url_for, flash, jsonify, Response, abort, after_this_request
 import os, yt_dlp, tempfile, uuid, threading, time, json, re
 
 app = Flask(__name__)
 app.secret_key = "ytm4a_secret"
 
-# In-memory job store (per process). For horizontal scaling, swap to Redis.
 JOBS = {}  # job_id -> dict(status, pct, eta, speed, title, filepath, error)
 
 INVALID_FS_CHARS = r'[\\/:*?"<>|]'
 
 def sanitize_title(title: str) -> str:
-    # Replace illegal filename chars and trim whitespace/length
     safe = re.sub(INVALID_FS_CHARS, "_", title).strip().rstrip(".")
     return (safe[:180] if len(safe) > 180 else safe) or "ytm4a_audio"
 
@@ -45,7 +42,7 @@ def download_job(job_id: str, url: str):
             JOBS[job_id].update({"status": "error", "error": str(e)})
 
     ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio",  # prefer m4a, fallback if not available
+        "format": "bestaudio[ext=m4a]/bestaudio",
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
@@ -90,7 +87,6 @@ def start():
 
 @app.route("/events/<job_id>")
 def events(job_id):
-    # SSE stream of progress updates
     def gen():
         last_payload = None
         while True:
@@ -106,11 +102,9 @@ def events(job_id):
                     "title": job.get("title", ""),
                 }
                 if job["status"] in ("ready", "error"):
-                    # Send final payload then end stream
                     yield f"data: {json.dumps(payload)}\n\n"
                     break
 
-            # Only push if changed or every 0.5s
             now_payload = json.dumps(payload)
             if now_payload != last_payload:
                 yield f"data: {now_payload}\n\n"
@@ -139,11 +133,7 @@ def file(job_id):
                 os.remove(path)
         except Exception:
             pass
-        # remove job from memory
-        try:
-            JOBS.pop(job_id, None)
-        except Exception:
-            pass
+        JOBS.pop(job_id, None)
         return response
 
     return send_file(path, as_attachment=True, download_name=download_name)
@@ -151,4 +141,3 @@ def file(job_id):
 
 if __name__ == "__main__":
     app.run()
-
