@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ytm4a – YouTube → M4A</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    let es; // EventSource
+    function $(sel){ return document.querySelector(sel); }
+
+    async function startDownload(e){
+      e.preventDefault();
+      const form = e.target;
+      const url = form.url.value.trim();
+      if(!url) return;
+
+      // UI: reset
+      $("#progressWrap").classList.remove("hidden");
+      $("#bar").style.width = "0%";
+      $("#pct").textContent = "0%";
+      $("#status").textContent = "Starting…";
+      $("#speed").textContent = "";
+      $("#error").classList.add("hidden");
+
+      // Kick off server job
+      const fd = new FormData();
+      fd.append("url", url);
+      const r = await fetch("/start", { method:"POST", body: fd });
+      const { job_id } = await r.json();
+
+      // Live updates via SSE
+      if(es) es.close();
+      es = new EventSource(`/events/${job_id}`);
+      es.onmessage = (msg) => {
+        const data = JSON.parse(msg.data || "{}");
+        if(data.pct != null){
+          $("#bar").style.width = `${data.pct}%`;
+          $("#pct").textContent = `${data.pct}%`;
+        }
+        if(data.speed){ $("#speed").textContent = data.speed; }
+        if(data.status){
+          let label = data.status;
+          if(label === "downloading") label = "Downloading…";
+          if(label === "post") label = "Finalizing…";
+          if(label === "ready") label = "Ready!";
+          if(label === "starting") label = "Starting…";
+          $("#status").textContent = label;
+        }
+
+        // When ready: trigger browser download to default Downloads without leaving page
+        if(data.status === "ready"){
+          es.close();
+          // Start the download in a hidden iframe so the page stays and UI can reset
+          const iframe = document.createElement("iframe");
+          iframe.style.display = "none";
+          iframe.src = `/file/${job_id}`;
+          document.body.appendChild(iframe);
+
+          // Stop animation/progress after short confirmation delay
+          setTimeout(() => {
+            $("#status").textContent = "Download completed";
+            $("#speed").textContent = "";
+          }, 500);
+        }
+
+        if(data.status === "error"){
+          es.close();
+          $("#errorMsg").textContent = "Download failed. Try another URL.";
+          $("#error").classList.remove("hidden");
+          $("#status").textContent = "Error";
+        }
+      };
+    }
+  </script>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white antialiased">
+  <main class="max-w-lg mx-auto px-6 py-16">
+    <section class="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 shadow-2xl p-8">
+      <header class="text-center mb-6">
+        <h1 class="text-3xl font-extrabold tracking-tight">
+          <span class="bg-gradient-to-r from-pink-500 to-violet-400 bg-clip-text text-transparent">ytm4a</span>
+        </h1>
+        <p class="text-gray-400 mt-2">Download YouTube audio as <span class="font-semibold text-gray-200">.m4a</span></p>
+      </header>
+
+      <form class="space-y-4" onsubmit="startDownload(event)">
+        <div>
+          <input
+            type="url" name="url" placeholder="Paste YouTube link…"
+            class="w-full px-4 py-3 rounded-xl text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-500"
+            required />
+        </div>
+        <button
+          type="submit"
+          class="w-full py-3 rounded-xl font-semibold bg-gradient-to-r from-pink-500 to-violet-500 hover:from-pink-600 hover:to-violet-600 shadow-lg transition">
+           Download
+        </button>
+      </form>
+
+      <!-- Progress -->
+      <div id="progressWrap" class="hidden mt-6">
+        <div class="flex items-center justify-between mb-2">
+          <span id="status" class="text-sm text-gray-300">Starting…</span>
+          <span id="pct" class="text-sm font-semibold text-gray-100">0%</span>
+        </div>
+        <div class="w-full h-3 bg-white/10 rounded-full overflow-hidden">
+          <div id="bar" class="h-3 bg-gradient-to-r from-pink-500 to-violet-500 transition-all duration-200" style="width:0%"></div>
+        </div>
+        <div class="text-xs text-gray-400 mt-2">
+          <span>Speed: <span id="speed">—</span></span>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div id="error" class="hidden mt-4">
+        <div class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          ⚠️ <span id="errorMsg">Something went wrong.</span>
+        </div>
+      </div>
+
+      <footer class="mt-8 text-center text-xs text-gray-500">
+        Built with  yt-dlp
+      </footer>
+    </section>
+  </main>
+</body>
+</html>
