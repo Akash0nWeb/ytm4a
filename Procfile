@@ -1,2 +1,5 @@
-web: gunicorn -w 1 -k gthread --threads 8 app:app
+gunicorn -w 1 -k gthread --threads 8 app:app
+
+
+
   
